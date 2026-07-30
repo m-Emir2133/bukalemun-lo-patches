@@ -140,7 +140,9 @@ configure() {
 --enable-ccache
 EOF
 
-  # 16 KB hizalama: bağlayıcıya doğrudan geçir
+  # Not: LDFLAGS burada yalnızca ara adımlar için ayarlanıyor. Asıl Android
+  # bağlama komutu bunu OKUMUYOR — 16 KB bayrağı patch_nss() içinde doğrudan
+  # Makefile.shared'a yazılıyor.
   export LDFLAGS="${ALIGN_FLAGS}"
   ./autogen.sh
 
@@ -148,22 +150,41 @@ EOF
   grep -m1 -A1 'checking host system type' config.log
 }
 
-# --- 5. NSS yamaları (Android + NDK 26 uyumsuzluğu) --------------------------
+# --- 5. Makefile yamaları ----------------------------------------------------
 patch_nss() {
-  say "NSS bağımlılıkları temizleniyor"
+  say "Android bağlama adımı yamalanıyor (NSS + 16 KB hizalama)"
   cd "$SRC"
 
-  # NSPR, NDK 26 ile derlenmiyor (stat64 uyumsuzluğu) -> --disable-nss ile kapattık.
-  # Ancak Android paketleme NSS'i koşulsuz bekliyor; NSSLIBS listesini boşalt.
-  python3 - <<'PY'
-import re, os
+  # İki değişiklik de aynı dosyada:
+  #
+  # 1) NSPR, NDK 26 ile derlenmiyor (stat64 uyumsuzluğu) -> --disable-nss ile
+  #    kapattık. Ancak Android paketleme NSS'i koşulsuz bekliyor; NSSLIBS boşalt.
+  #
+  # 2) 16 KB hizalama bayrağı DOĞRUDAN bağlama komutuna girmek zorunda.
+  #    Ortam LDFLAGS'i buraya ULAŞMIYOR: aşağıdaki kural kendi $(CXX) satırını
+  #    kuruyor ve LDFLAGS'e hiç bakmıyor. Bayrağı yalnızca dışarıdan verirsek
+  #    derleme sorunsuz biter ama .so 4 KB hizalı çıkar ve Play reddeder.
+  python3 - "$ALIGN_FLAGS" <<'PY'
+import re, os, sys
+align = sys.argv[1]
 p = "android/Bootstrap/Makefile.shared"
 s = open(p).read()
 if not os.path.exists(p + ".orig"):
     open(p + ".orig", "w").write(s)
+
 s = re.sub(r'NSSLIBS\s*[:+]?=(?:[^\n\\]*\\\n)*[^\n]*', 'NSSLIBS =', s, count=1)
-open(p, "w").write(s)
 print("  Makefile.shared: NSSLIBS bosaltildi")
+
+old = "$(CXX) -Wl,--build-id=sha1"
+if align in s:
+    print("  Makefile.shared: hizalama bayragi zaten ekli")
+elif old in s:
+    s = s.replace(old, "$(CXX) " + align + " -Wl,--build-id=sha1", 1)
+    print("  Makefile.shared: 16 KB hizalama bayragi baglama komutuna eklendi")
+else:
+    sys.exit("  HATA: baglama satiri bulunamadi, Makefile.shared degismis olabilir")
+
+open(p, "w").write(s)
 PY
 
   # Bağlayıcı bayraklarını üreten script'ten de NSS'i çıkar
@@ -181,20 +202,38 @@ open(p, "w").write(s)
 print("  lo-all-static-libs: NSS bayraklari kaldirildi")
 PY
 
-  # Bağlayıcının aradığı boş arşiv
-  A="workdir/UnpackedTarball/xmlsec/src/nss/.libs"
+}
+
+# Bağlayıcının aradığı boş arşiv.
+# DİKKAT: bunu derlemeden önce bir kez oluşturmak YETMİYOR. xmlsec tarball'ı
+# derleme sırasında açılınca .libs klasörü sıfırlanıyor ve arşiv siliniyor;
+# derleme saatlerce sürüp en son bağlama adımında "No rule to make target"
+# ile düşüyor. Bu yüzden bağlamadan hemen önce tekrar oluşturuyoruz.
+make_nss_stub() {
+  local A="$SRC/workdir/UnpackedTarball/xmlsec/src/nss/.libs"
   mkdir -p "$A"
-  [ -f "$A/libxmlsec1-nss.a" ] || \
-    "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs "$A/libxmlsec1-nss.a"
+  "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs "$A/libxmlsec1-nss.a"
 }
 
 # --- 6. Derleme --------------------------------------------------------------
 build() {
   say "Derleniyor ($JOBS iş parçacığı) — LO 24.8'de hedef adı 'build'"
   cd "$SRC"
-  export LDFLAGS="${ALIGN_FLAGS}"
   set -o pipefail
-  make -j"$JOBS" build 2>&1 | tee "$WORK/build.log" | tail -40
+  make_nss_stub
+
+  # xmlsec derleme ortasında açılırsa yer tutucu silinir; o durumda arşivi
+  # yeniden yaratıp bir kez daha deniyoruz. İkinci geçiş yalnızca bağlama
+  # yaptığı için dakikalar sürer, baştan derleme değildir.
+  if ! make -j"$JOBS" build 2>&1 | tee "$WORK/build.log" | tail -40; then
+    if grep -q "libxmlsec1-nss.a" "$WORK/build.log"; then
+      say "xmlsec yer tutucusu silinmiş — yeniden oluşturulup bağlama tekrarlanıyor"
+      make_nss_stub
+      make -j"$JOBS" build 2>&1 | tee -a "$WORK/build.log" | tail -20
+    else
+      return 1
+    fi
+  fi
 }
 
 # --- 7. Çıktı toplama + hizalama doğrulama -----------------------------------
@@ -237,7 +276,7 @@ collect() {
     echo "    cp -r $OUT/jniLibs/arm64-v8a/*.so /mnt/c/dev/lo-android-engine/engine/src/main/jniLibs/arm64-v8a/"
     echo "    cp -r $OUT/assets/* /mnt/c/dev/lo-android-engine/engine/src/main/assets/"
   else
-    say "UYARI: hizalama tutmadi, LDFLAGS gecmemis olabilir"
+    say "UYARI: hizalama tutmadi — patch_nss() Makefile.shared'a bayragi yazamamis olabilir"
   fi
 }
 
@@ -245,7 +284,7 @@ collect() {
 if [ "${1:-}" = "--relink" ]; then
   say "Yalnızca yeniden linkleme"
   cd "$SRC"
-  export LDFLAGS="${ALIGN_FLAGS}"
+  patch_nss          # idempotent; hizalama bayrağının yerinde olduğunu garanti eder
   rm -f android/obj/local/arm64-v8a/liblo-native-code.so
   build
   collect

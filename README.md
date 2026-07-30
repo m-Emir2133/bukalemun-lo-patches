@@ -14,6 +14,7 @@ published here.
 | File | Change | Why |
 |---|---|---|
 | `android/Bootstrap/Makefile.shared` | `NSSLIBS` emptied | We build with `--disable-nss`, but the Android packaging step links the NSS libraries unconditionally |
+| `android/Bootstrap/Makefile.shared` | 16 KB page-size flags added to the link command | See "16 KB alignment" below |
 
 That is the entire diff — see [`patches/`](patches/).
 
@@ -76,6 +77,28 @@ before configuring — this also speeds up the build noticeably.
 `android/obj/local/arm64-v8a/liblo-native-code.so`.
 
 **The build target is `build`,** not `build-nocheck`, on this branch.
+
+**16 KB alignment cannot be passed through `LDFLAGS`.** The rule that links
+`liblo-native-code.so` in `android/Bootstrap/Makefile.shared` builds its own
+`$(CXX)` command line and never reads `LDFLAGS`. Exporting the flags in the
+environment produces a build that succeeds and a library that is still 4 KB
+aligned — which Google Play rejects, with no warning anywhere in the build
+output. The flags must be written into that command line, which is what the
+patch does. Always verify afterwards:
+
+```bash
+llvm-readelf -l liblo-native-code.so | grep -m1 " LOAD "   # must end in 0x4000
+```
+
+**The empty `libxmlsec1-nss.a` must be created immediately before linking,
+not once at the start.** Unpacking the xmlsec tarball during the build wipes
+`workdir/UnpackedTarball/xmlsec/src/nss/.libs/`, so a placeholder created
+beforehand is gone by the time the linker needs it — and you only find out
+after the whole build has completed. The script creates it right before `make`
+and retries once if it disappeared anyway.
+
+**`libc++_shared.so` from NDK r26 is 4 KB aligned.** The script deliberately
+does not ship it; take it from NDK 27 or newer, which is 16 KB aligned.
 
 ## Licence
 
