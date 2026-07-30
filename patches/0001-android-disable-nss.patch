@@ -1,0 +1,23 @@
+--- a/android/Bootstrap/Makefile.shared
++++ b/android/Bootstrap/Makefile.shared
+@@ -36,19 +36,7 @@
+   $(ALL_STATIC_LIBS) \
+   -Wl,--end-group
+ 
+-NSSLIBS = freebl3 \
+-	nspr4 \
+-	nss3 \
+-	nssckbi \
+-	nssdbm3 \
+-	nssutil3 \
+-	plc4 \
+-	plds4 \
+-	smime3 \
+-	softokn3 \
+-	sqlite3 \
+-	ssl3 \
+-
++NSSLIBS =
+ WHOLELIBS = \
+   -Wl,--whole-archive \
+   $(addprefix -l,$(strip \
