@@ -250,6 +250,16 @@ collect() {
 
   cp -r "$SRC/instdir/share/." "$ASSETS/share/"
   cp "$SRC/instdir/program/"*.rdb "$ASSETS/program/" 2>/dev/null || true
+
+  # offapi.rdb ve oovbaapi.rdb program/types/ ALT KLASORUNDE duruyor; yukaridaki
+  # *.rdb kalibi onlari atliyor. Bootstrap ikisini de program/ altinda DUZ bekler
+  # (LoConfig.kt: UNO_TYPES=...program/offapi.rdb ...program/oovbaapi.rdb).
+  # Eksik olurlarsa motor acilirken DeploymentException ile cokuyor.
+  cp "$SRC/instdir/program/types/"*.rdb "$ASSETS/program/" 2>/dev/null || true
+
+  for need in types.rdb services.rdb offapi.rdb oovbaapi.rdb; do
+    [ -f "$ASSETS/program/$need" ] || { echo "HATA: assets/program/$need eksik"; exit 1; }
+  done
   cp -r "$SRC/instdir/program/services" "$ASSETS/program/" 2>/dev/null || true
   cp -r "$SRC/instdir/program/resource" "$ASSETS/program/" 2>/dev/null || true
   cp "$SRC/instdir/program/"*rc "$ASSETS/program/" 2>/dev/null || true

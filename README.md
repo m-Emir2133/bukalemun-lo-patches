@@ -97,6 +97,14 @@ beforehand is gone by the time the linker needs it — and you only find out
 after the whole build has completed. The script creates it right before `make`
 and retries once if it disappeared anyway.
 
+**`offapi.rdb` and `oovbaapi.rdb` live in `instdir/program/types/`, not
+`instdir/program/`.** A `program/*.rdb` glob silently misses them. Our
+bootstrap expects all four registries flat under `program/`; without the two
+type registries the engine loads, prints `libreofficekit_initialize finished`,
+and *then* aborts with an uncaught `com::sun::star::uno::DeploymentException`
+— a failure that looks like a bootstrap problem but is really a missing file.
+The script copies them explicitly and asserts all four exist before finishing.
+
 **`libc++_shared.so` from NDK r26 is 4 KB aligned.** The script deliberately
 does not ship it; take it from NDK 27 or newer, which is 16 KB aligned.
 
