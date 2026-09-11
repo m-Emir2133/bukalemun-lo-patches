@@ -284,7 +284,7 @@ collect() {
     say "TAMAM — çıktılar: $OUT"
     echo "  Windows'a kopyalamak icin:"
     echo "    cp -r $OUT/jniLibs/arm64-v8a/*.so /mnt/c/dev/lo-android-engine/engine/src/main/jniLibs/arm64-v8a/"
-    echo "    cp -r $OUT/assets/* /mnt/c/dev/lo-android-engine/engine/src/main/assets/"
+    echo "    cp -r $OUT/assets/* /mnt/c/dev/lo-android-engine/engine/lo-assets/"
   else
     say "UYARI: hizalama tutmadi — patch_nss() Makefile.shared'a bayragi yazamamis olabilir"
   fi
